@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FXGAMERHQ Car Game</title>
+<style>
+body{margin:0;overflow:hidden;background:#111;}
+canvas{display:block;margin:auto;background:#222;}
+#ui{position:absolute;top:10px;left:10px;color:white;font-family:Arial;font-size:20px;}
+#brand{position:absolute;top:10px;right:10px;color:#0ff;font-family:'Arial Black';font-size:22px;}
+#start{position:absolute;top:0;left:0;width:100%;height:100%;background:#111;color:white;display:flex;justify-content:center;align-items:center;font-size:24px;cursor:pointer;z-index:100;}
+</style>
+</head>
+<body>
+<div id="ui">Score: 0 | Coins: 0</div>
+<div id="brand">FXGAMERHQ</div>
+<canvas id="game" width="480" height="640"></canvas>
+<div id="start">Tap or Click to Start</div>
+
+<audio id="coinSound" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg"></audio>
+<audio id="crashSound" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+<audio id="safeSound" src="https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg"></audio>
+<audio id="engineSound" src="https://actions.google.com/sounds/v1/ambiences/engine_idle_loop.ogg" loop></audio>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const ui=document.getElementById("ui");
+const coinSound=document.getElementById("coinSound");
+const crashSound=document.getElementById("crashSound");
+const safeSound=document.getElementById("safeSound");
+const engineSound=document.getElementById("engineSound");
+
+let roadWidth=200;
+let car={x:220,y:520,w:40,h:80,color:"#0ff",blinkFrame:0};
+let keys={};
+let coins=[];
+let enemies=[];
+let safeCar=null;
+let magnet=false;
+let invincible=false;
+let magnetTimer=0;
+let safeCarDelay=0;
+let score=0;
+let coinsCollected=0;
+let frame=0;
+let speed=5;
+
+document.addEventListener("keydown",e=>keys[e.key]=true);
+document.addEventListener("keyup",e=>keys[e.key]=false);
+
+// Touch controls for mobile
+let touchStartX=null;
+canvas.addEventListener("touchstart", e=>{touchStartX=e.touches[0].clientX;});
+canvas.addEventListener("touchmove", e=>{
+  let dx=e.touches[0].clientX - touchStartX;
+  if(dx>20){car.x+=5; touchStartX=e.touches[0].clientX;}
+  if(dx<-20){car.x-=5; touchStartX=e.touches[0].clientX;}
+});
+
+function randColor(){return ["#ff4040","#ffa500","#00ff40","#00bfff","#ff69b4","#9932cc"][Math.floor(Math.random()*6)];}
+function spawnEnemy(){let w=40,h=80; let x=140+Math.random()*(roadWidth-w); enemies.push({x,y:-h,w,h,color:randColor()});}
+function spawnCoin(){coins.push({x:140+Math.random()*(roadWidth-20),y:-20,r:10});}
+function spawnSafeCar(){let x=140+Math.random()*(roadWidth-40); safeCar={x,y:-80,w:40,h:80,color:"gold",blink:true,blinkFrame:0};}
+
+function drawCarShape(x,y,w,h,bodyColor,detailColor){
+  ctx.fillStyle=bodyColor; ctx.fillRect(x,y,w,h);
+  ctx.fillStyle=detailColor; ctx.fillRect(x+5,y+20,w-10,h-40);
+  ctx.fillStyle="#000";
+  ctx.fillRect(x-4,y+5,4,15); ctx.fillRect(x+w,y+5,4,15);
+  ctx.fillRect(x-4,y+h-20,4,15); ctx.fillRect(x+w,y+h-20,4,15);
+  ctx.fillStyle="#fff"; ctx.fillRect(x+10,y,6,6); ctx.fillRect(x+w-16,y,6,6);
+}
+
+function drawCar(carObj){
+  if(carObj.color==="gold") drawCarShape(carObj.x,carObj.y,carObj.w,carObj.h,"#ffd700","#fff000");
+  else drawCarShape(carObj.x,carObj.y,carObj.w,carObj.h,carObj.color,"#999");
+}
+
+// Start game on tap/click (for mobile audio)
+document.getElementById("start").addEventListener("click",()=>{
+  engineSound.play();
+  document.getElementById("start").style.display="none";
+  update();
+});
+
+function update(){
+  frame++;
+  let moved=false;
+  if(keys["ArrowLeft"]){car.x-=5; moved=true;}
+  if(keys["ArrowRight"]){car.x+=5; moved=true;}
+  car.x=Math.max(140,Math.min(140+roadWidth-car.w,car.x));
+
+  // Engine sound tied to player movement
+  if(moved){ if(engineSound.paused) engineSound.play(); engineSound.volume=0.3;}
+  else{ engineSound.pause(); engineSound.currentTime=0;}
+
+  // Increase speed every 100 points
+  if(score > 0 && score % 100 === 0) {
+    speed = 5 + Math.floor(score/100);
+  }
+
+  if(frame%100===0) spawnEnemy();
+  if(frame%80===0) spawnCoin();
+  if(!safeCar && safeCarDelay<=0 && Math.random()<0.005) spawnSafeCar();
+
+  // Magnet/Invincibility logic
+  if(magnet){
+    magnetTimer--;
+    invincible = true;
+
+    // Last 1 second blinking warning
+    if(magnetTimer <= 60){
+      car.blinkFrame++;
+      if(car.blinkFrame%10<5) car.color="#ffd700";
+      else car.color="#ffff00";
+    } else {
+      car.color="gold";
+    }
+
+    if(magnetTimer <= 0){
+      magnet=false; invincible=false; car.color="#0ff";
+    }
+  }
+
+  if(safeCarDelay>0) safeCarDelay--;
+
+  coins.forEach(c=>c.y += speed);
+  enemies.forEach(e=>e.y += speed);
+  if(safeCar) safeCar.y += speed;
+
+  coins=coins.filter(c=>c.y<canvas.height);
+  enemies=enemies.filter(e=>e.y<canvas.height);
+
+  if(magnet){coins.forEach(c=>{let dx=c.x-(car.x+car.w/2); let dy=c.y-(car.y+car.h/2); let dist=Math.sqrt(dx*dx+dy*dy); if(dist<120){c.x-=dx*0.1;c.y-=dy*0.1;}});}
+
+  // Coin collection
+  for(let i=coins.length-1;i>=0;i--){
+    let c=coins[i];
+    let dx=c.x-(car.x+car.w/2); let dy=c.y-(car.y+car.h/2);
+    let dist=Math.sqrt(dx*dx+dy*dy);
+    let pickupRange = magnet ? 35 : 25;
+    if(dist<pickupRange){coins.splice(i,1); coinSound.currentTime=0; coinSound.play(); score+=10; coinsCollected++;}
+  }
+
+  // Safe car collection
+  if(safeCar && car.x<safeCar.x+safeCar.w && car.x+car.w>safeCar.x && car.y<safeCar.y+safeCar.h && car.y+car.h>safeCar.y){
+    safeSound.currentTime=0; safeSound.play(); safeCar=null; magnet=true; invincible=true; magnetTimer=600; car.color="gold";
+    safeCarDelay=18000 + Math.floor(Math.random()*3600);
+  }
+
+  // Enemy collision
+  for(let e of enemies){
+    if(car.x<e.x+e.w && car.x+car.w>e.x && car.y<e.y+e.h && car.y+car.h>e.y){
+      if(!invincible){crashSound.currentTime=0; crashSound.play(); alert("Game Over! Score: "+score); document.location.reload();}
+    }
+  }
+
+  if(safeCar && safeCar.y>canvas.height){safeCar=null; safeCarDelay=18000 + Math.floor(Math.random()*3600);}
+
+  draw();
+  requestAnimationFrame(update);
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.fillStyle="#333"; ctx.fillRect(130,0,roadWidth+20,canvas.height);
+  ctx.strokeStyle="#888"; ctx.setLineDash([20,20]); ctx.beginPath(); ctx.moveTo(240,0); ctx.lineTo(240,canvas.height); ctx.stroke(); ctx.setLineDash([]);
+
+  drawCar(car);
+  enemies.forEach(e=>{drawCar(e);});
+
+  ctx.fillStyle="gold"; coins.forEach(c=>{ctx.beginPath(); ctx.arc(c.x,c.y,c.r,0,Math.PI*2); ctx.fill();});
+
+  if(safeCar){safeCar.blinkFrame++; if(safeCar.blinkFrame%20<10) ctx.globalAlpha=0.4; else ctx.globalAlpha=1; drawCarShape(safeCar.x,safeCar.y,safeCar.w,safeCar.h,"#ffd700","#fff000"); ctx.globalAlpha=1;}
+
+  ui.textContent="Score: "+score+" | Coins: "+coinsCollected;
+}
+</script>
+</body>
+</html> 
